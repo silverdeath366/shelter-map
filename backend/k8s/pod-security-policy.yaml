@@ -1,0 +1,24 @@
+---
+# Pod Security Standards Configuration
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default
+  labels:
+    # Pod Security Standard: baseline
+    # This enforces:
+    # - Non-root containers (where possible)
+    # - Read-only root filesystem (where possible)
+    # - Drop all capabilities (where possible)
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Note: Pod Security Policy (PSP) is deprecated in Kubernetes 1.21+ and removed in 1.25+
+# EKS 1.28+ uses Pod Security Standards (configured above via namespace labels)
+# This file uses Pod Security Standards instead of the deprecated PSP
+# The namespace labels above enforce baseline security standards
+# For more information: https://kubernetes.io/docs/concepts/security/pod-security-standards/
+

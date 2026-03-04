@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shelter Map</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.0.0/mapbox-gl.css" rel="stylesheet" crossorigin="anonymous"><!-- nosemgrep: html.security.audit.missing-integrity -->
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.0.0/mapbox-gl.js" crossorigin="anonymous"></script><!-- nosemgrep: html.security.audit.missing-integrity -->
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font: 14px/1.4 sans-serif;
+    }
+
+    #map {
+      width: 100%;
+      height: 100vh;
+    }
+
+    #status {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 6px 10px;
+      border-radius: 4px;
+      z-index: 1;
+    }
+
+    #find-closest {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 10px 16px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      z-index: 1;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+    #find-closest:hover {
+      background: #1d4ed8;
+    }
+    #find-closest:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    #my-location {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      margin-right: 180px;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      background: #fff;
+      border: none;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      cursor: pointer;
+      z-index: 1;
+      font-size: 18px;
+      line-height: 1;
+    }
+    #my-location:hover { background: #f0f0f0; }
+    #my-location:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    #setup {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #f0f0f0;
+      padding: 20px;
+    }
+
+    #setup form {
+      background: #fff;
+      padding: 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      max-width: 420px;
+      width: 100%;
+    }
+
+    #setup label {
+      display: block;
+      margin: 12px 0 4px;
+      font-weight: 600;
+    }
+
+    #setup input {
+      width: 100%;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    #setup button {
+      margin-top: 16px;
+      padding: 10px 20px;
+      background: #333;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    #setup button:hover {
+      background: #555;
+    }
+
+    #setup p {
+      margin: 0 0 16px;
+      color: #666;
+      font-size: 13px;
+    }
+
+    .popup-shelter {
+      padding: 4px 0;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .popup-nav {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 6px 12px;
+      background: #22c55e;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .popup-nav:hover {
+      background: #16a34a;
+    }
+
+    #map-legend {
+      position: absolute;
+      bottom: 24px;
+      left: 8px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.6;
+      z-index: 1;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+    #map-legend .legend-row { margin: 2px 0; }
+    #map-legend .legend-dot {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    #map-legend .legend-dot.you { background: #2b7cff; }
+    #map-legend .legend-dot.shelters { background: #22c55e; }
+    #map-legend .legend-dot.closest { background: #dc2626; }
+  </style>
+</head>
+
+<body>
+  <div id="setup" style="display: none;">
+    <form id="setup-form">
+      <p>Enter your Mapbox token and API base URL.</p>
+      <label for="token">Mapbox access token</label>
+      <input type="text" id="token" name="token" placeholder="pk.eyJ1..." required>
+      <label for="apiBase">API base URL</label>
+      <input type="text" id="apiBase" name="apiBase" placeholder="http://localhost:8005" value="http://localhost:8091">
+      <label for="apiKey">API key (optional, if backend requires auth)</label>
+      <input type="text" id="apiKey" name="apiKey" placeholder="Leave empty for dev_open">
+      <button type="submit">Load map</button>
+    </form>
+  </div>
+  <div id="status">Loading…</div>
+  <button type="button" id="my-location" title="Center on my location" style="display: none;">📍</button>
+  <button type="button" id="find-closest">Find Closest Shelter</button>
+  <div id="map"></div>
+  <div id="map-legend" style="display: none;">
+    <div class="legend-row"><span class="legend-dot you"></span> You</div>
+    <div class="legend-row"><span class="legend-dot shelters"></span> Shelters around you</div>
+    <div class="legend-row"><span class="legend-dot closest"></span> Closest shelter</div>
+  </div>
+
+  <script>
+    (function () {
+      // Config: from sessionStorage (set by setup form) or window (console).
+      if (sessionStorage.getItem('MAPBOX_ACCESS_TOKEN')) {
+        window.MAPBOX_ACCESS_TOKEN = window.MAPBOX_ACCESS_TOKEN || sessionStorage.getItem('MAPBOX_ACCESS_TOKEN');
+        window.API_BASE = window.API_BASE || sessionStorage.getItem('API_BASE') || '';
+        window.API_KEY = window.API_KEY || sessionStorage.getItem('API_KEY') || '';
+      }
+      window.API_BASE = window.API_BASE || '';
+      window.MAPBOX_ACCESS_TOKEN = window.MAPBOX_ACCESS_TOKEN || '';
+      window.API_KEY = window.API_KEY || '';
+
+      function getFakeTestLocation() {
+        var params = new URLSearchParams(window.location.search);
+        var test = params.get('test');
+        if (test === 'jerusalem') return [35.2137, 31.7683];
+        if (test === 'petah_tikva') return [34.89, 32.09];
+        var lat = parseFloat(params.get('lat'));
+        var lon = parseFloat(params.get('lon'));
+        if (Number.isFinite(lat) && Number.isFinite(lon)) return [lon, lat];
+        return null;
+      }
+
+      var setupEl = document.getElementById('setup');
+      var setupForm = document.getElementById('setup-form');
+      if (!window.MAPBOX_ACCESS_TOKEN && setupEl && setupForm) {
+        setupEl.style.display = 'flex';
+        var statusEl = document.getElementById('status');
+        if (statusEl) statusEl.style.display = 'none';
+        var findClosestEl = document.getElementById('find-closest');
+        if (findClosestEl) findClosestEl.style.display = 'none';
+        var myLocationEl = document.getElementById('my-location');
+        if (myLocationEl) myLocationEl.style.display = 'none';
+        setupForm.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var token = (document.getElementById('token') || {}).value;
+          var base = (document.getElementById('apiBase') || {}).value || '';
+          var apiKeyInput = document.getElementById('apiKey');
+          var key = apiKeyInput ? apiKeyInput.value : '';
+          if (token) {
+            sessionStorage.setItem('MAPBOX_ACCESS_TOKEN', token.trim());
+            sessionStorage.setItem('API_BASE', base.trim());
+            sessionStorage.setItem('API_KEY', (key && key.trim()) ? key.trim() : '');
+            location.reload();
+          }
+        });
+        return;
+      }
+
+      var map = null;
+      var userLocationMarker = null;
+      var userLocationCoords = null;
+      var closestPopup = null;
+      var EMPTY_FC = { type: 'FeatureCollection', features: [] };
+
+      function apiUrl(path) {
+        var base = (window.API_BASE || '').replace(/\/$/, '');
+        return base + path;
+      }
+
+      function fetchOptions() {
+        var opts = { headers: {} };
+        if (window.API_KEY) opts.headers['X-API-Key'] = window.API_KEY;
+        return opts;
+      }
+
+      function setStatus(msg) {
+        var el = document.getElementById('status');
+        if (el) el.textContent = msg;
+      }
+
+      function fetchJson(url) {
+        return fetch(url, fetchOptions()).then(function (r) {
+          if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+          return r.json();
+        });
+      }
+
+      function getBoundsParams() {
+        if (!map) return null;
+        var b = map.getBounds();
+        return {
+          min_lon: b.getWest(),
+          min_lat: b.getSouth(),
+          max_lon: b.getEast(),
+          max_lat: b.getNorth()
+        };
+      }
+
+      function loadShelters() {
+        var params = getBoundsParams();
+        if (!params) return Promise.resolve(EMPTY_FC);
+        var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+        return fetchJson(apiUrl('/v1/shelters/bbox') + '?' + qs).then(function (res) {
+          return res && res.features ? { type: 'FeatureCollection', features: res.features } : EMPTY_FC;
+        }).catch(function () { return EMPTY_FC; });
+      }
+
+      function initSheltersLayer() {
+        if (!map || map.getSource('shelters')) return;
+        map.addSource('shelters', { type: 'geojson', data: EMPTY_FC });
+        map.addLayer({
+          id: 'shelters-circles',
+          type: 'circle',
+          source: 'shelters',
+          paint: { 'circle-radius': 10, 'circle-color': '#22c55e' }
+        });
+        if (!map.getSource('closest-shelter')) {
+          map.addSource('closest-shelter', { type: 'geojson', data: EMPTY_FC });
+          map.addLayer({
+            id: 'closest-shelter-circle',
+            type: 'circle',
+            source: 'closest-shelter',
+            paint: {
+              'circle-radius': 16,
+              'circle-color': '#dc2626',
+              'circle-stroke-width': 4,
+              'circle-stroke-color': '#991b1b'
+            }
+          });
+        }
+      }
+
+      function setUserLocationMarker(lngLat) {
+        if (userLocationMarker) {
+          userLocationMarker.remove();
+          userLocationMarker = null;
+        }
+        if (!map || !lngLat) return;
+        var el = document.createElement('div');
+        el.className = 'user-location-marker';
+        el.style.width = '24px';
+        el.style.height = '24px';
+        el.style.borderRadius = '50%';
+        el.style.backgroundColor = '#2b7cff';
+        el.style.border = '3px solid #fff';
+        el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.35)';
+        el.style.pointerEvents = 'none';
+        userLocationMarker = new mapboxgl.Marker({ element: el })
+          .setLngLat(lngLat)
+          .addTo(map);
+      }
+
+      function setClosestShelter(feature) {
+        if (!map || !map.getSource('closest-shelter')) return;
+        var fc = feature
+          ? { type: 'FeatureCollection', features: [feature] }
+          : EMPTY_FC;
+        map.getSource('closest-shelter').setData(fc);
+      }
+
+      function updateShelters(fc) {
+        if (!map) return;
+        initSheltersLayer();
+        map.getSource('shelters').setData(fc && fc.features ? fc : EMPTY_FC);
+      }
+
+      function getLngLat(feature) {
+        var geom = feature && feature.geometry;
+        if (!geom || geom.type !== 'Point' || !geom.coordinates || geom.coordinates.length < 2) return null;
+        return geom.coordinates;
+      }
+
+      function buildPopupContent(feature, distanceM) {
+        var p = (feature && feature.properties) || {};
+        var name = p.name != null ? String(p.name) : '—';
+        var address = p.address != null ? String(p.address) : '—';
+        var capacity = p.capacity != null ? String(p.capacity) : '—';
+        var accessibility = p.accessibility != null ? String(p.accessibility) : '—';
+        var coords = getLngLat(feature);
+        var lat = coords ? coords[1] : '';
+        var lon = coords ? coords[0] : '';
+        var navUrl = (lat !== '' && lon !== '') ? 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lon : '#';
+        var distLine = (distanceM != null && distanceM !== '') ? 'Distance: ' + escapeHtml(String(Math.round(distanceM))) + ' m<br>' : '';
+        return '<div class="popup-shelter">' +
+          distLine +
+          '<strong>' + escapeHtml(name) + '</strong><br>' +
+          'Address: ' + escapeHtml(address) + '<br>' +
+          'Capacity: ' + escapeHtml(capacity) + '<br>' +
+          'Accessibility: ' + escapeHtml(accessibility) + '<br>' +
+          (navUrl !== '#' ? '<a href="' + navUrl + '" target="_blank" rel="noopener" class="popup-nav">Navigate</a>' : '') +
+          '</div>';
+      }
+
+      function escapeHtml(s) {
+        var div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+      }
+
+      function tick() {
+        if (!(window.API_BASE && window.API_BASE.trim())) {
+          setStatus('Set API base URL in setup to load shelters');
+          return;
+        }
+        loadShelters().then(function (fc) {
+          updateShelters(fc);
+          var n = fc.features ? fc.features.length : 0;
+          setStatus(n ? 'Shelters: ' + n : 'Shelters: 0 — load shelter data for this area (see backend README)');
+        }).catch(function (err) {
+          setStatus('Shelters: ' + (err.message || 'error') + ' — check API URL and auth');
+        });
+      }
+
+      function debounce(fn, ms) {
+        var timeoutId;
+        return function () {
+          if (timeoutId) clearTimeout(timeoutId);
+          timeoutId = setTimeout(function () {
+            timeoutId = null;
+            fn();
+          }, ms);
+        };
+      }
+      var debouncedTick = debounce(tick, 280);
+
+      if (!window.MAPBOX_ACCESS_TOKEN) {
+        setStatus('Set window.MAPBOX_ACCESS_TOKEN');
+        return;
+      }
+
+      if (typeof mapboxgl === 'undefined') {
+        setStatus('Mapbox GL failed to load. Check the browser console.');
+        return;
+      }
+
+      setStatus('Loading map…');
+      var initialFake = getFakeTestLocation();
+      // Default center: Petah Tikva / Israel when no test params (user location will override when geolocation returns)
+      var defaultCenter = [34.89, 32.09];
+      var mapCenter = initialFake ? initialFake : defaultCenter;
+      var mapZoom = initialFake ? 14 : 12;
+      try {
+        mapboxgl.accessToken = window.MAPBOX_ACCESS_TOKEN;
+        map = new mapboxgl.Map({
+          container: 'map',
+          style: 'mapbox://styles/mapbox/streets-v12',
+          center: mapCenter,
+          zoom: mapZoom
+        });
+
+        map.on('load', function () {
+          initSheltersLayer();
+          map.on('moveend', debouncedTick);
+          map.on('zoomend', debouncedTick);
+          var legendEl = document.getElementById('map-legend');
+          if (legendEl) legendEl.style.display = 'block';
+
+          function applyUserLocation(lon, lat, instant) {
+            userLocationCoords = [lon, lat];
+            setUserLocationMarker(userLocationCoords);
+            if (instant) {
+              map.jumpTo({ center: userLocationCoords, zoom: 14 });
+              tick();
+            } else {
+              map.flyTo({ center: userLocationCoords, zoom: 14 });
+              map.once('moveend', function () { tick(); });
+            }
+          }
+          function onUserLocation(pos) {
+            applyUserLocation(pos.coords.longitude, pos.coords.latitude);
+          }
+          function onUserLocationError(err) {
+            var msg = 'Location unavailable.';
+            if (err && err.code === 1) msg = 'Location denied. Click 📍 to try again.';
+            else if (err && err.code === 3) msg = 'Location timed out. Click 📍 to try again.';
+            setStatus(msg);
+          }
+          function requestUserLocation() {
+            if (!navigator.geolocation) {
+              setStatus('Geolocation not supported');
+              return;
+            }
+            setStatus('Getting your location…');
+            navigator.geolocation.getCurrentPosition(
+              onUserLocation,
+              onUserLocationError,
+              { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+            );
+          }
+          var myLocationBtn = document.getElementById('my-location');
+          if (myLocationBtn) {
+            myLocationBtn.style.display = 'block';
+            myLocationBtn.addEventListener('click', requestUserLocation);
+          }
+          var fakeLocation = getFakeTestLocation();
+          if (fakeLocation) {
+            var testName = (new URLSearchParams(window.location.search)).get('test') === 'petah_tikva' ? 'Petah Tikva' : 'Jerusalem';
+            setStatus('Test mode: you\'re at ' + testName + ' — shelters should load here');
+            applyUserLocation(fakeLocation[0], fakeLocation[1], true);
+          } else {
+            tick();
+            if (navigator.geolocation) {
+              requestUserLocation();
+            } else {
+              setStatus('Geolocation not supported');
+            }
+          }
+
+          map.on('click', 'shelters-circles', function (e) {
+            var feat = e.features && e.features[0];
+            if (!feat) return;
+            var coords = getLngLat(feat);
+            if (!coords) return;
+            new mapboxgl.Popup({ offset: 15 })
+              .setLngLat([coords[0], coords[1]])
+              .setHTML(buildPopupContent(feat))
+              .addTo(map);
+          });
+          map.on('mouseenter', 'shelters-circles', function () { map.getCanvas().style.cursor = 'pointer'; });
+          map.on('mouseleave', 'shelters-circles', function () { map.getCanvas().style.cursor = ''; });
+
+          var findClosestBtn = document.getElementById('find-closest');
+          if (findClosestBtn) {
+            findClosestBtn.addEventListener('click', function () {
+              if (findClosestBtn.disabled) return;
+              findClosestBtn.disabled = true;
+              if (closestPopup) {
+                closestPopup.remove();
+                closestPopup = null;
+              }
+              setClosestShelter(null);
+
+              function done() { findClosestBtn.disabled = false; }
+
+              function useCoords(lon, lat) {
+                if (!userLocationCoords) {
+                  userLocationCoords = [lon, lat];
+                  setUserLocationMarker(userLocationCoords);
+                }
+                var url = apiUrl('/v1/shelters/nearby') + '?lon=' + encodeURIComponent(lon) + '&lat=' + encodeURIComponent(lat) + '&radius=2000&limit=1';
+                setStatus('Finding closest shelter…');
+                fetchJson(url).then(function (res) {
+                  var features = res && res.features ? res.features : [];
+                  if (features.length === 0) {
+                    setStatus('No shelter within 2 km');
+                    setClosestShelter(null);
+                    done();
+                    return;
+                  }
+                  var feature = features[0];
+                  var distanceM = feature.distance_m;
+                  setClosestShelter(feature);
+                  var coords = getLngLat(feature);
+                  if (coords) {
+                    closestPopup = new mapboxgl.Popup({ offset: 15 })
+                      .setLngLat([coords[0], coords[1]])
+                      .setHTML(buildPopupContent(feature, distanceM))
+                      .addTo(map);
+                    map.flyTo({ center: [coords[0], coords[1]], zoom: 16 });
+                  }
+                  setStatus('Closest shelter: ' + (distanceM != null ? Math.round(distanceM) + ' m' : '—'));
+                  done();
+                }).catch(function (err) {
+                  setStatus('Error: ' + (err.message || err));
+                  done();
+                });
+              }
+
+              if (userLocationCoords && userLocationCoords.length >= 2) {
+                setStatus('Finding closest shelter…');
+                useCoords(userLocationCoords[0], userLocationCoords[1]);
+                return;
+              }
+              if (!navigator.geolocation) {
+                setStatus('Geolocation not supported');
+                done();
+                return;
+              }
+              setStatus('Getting location…');
+              navigator.geolocation.getCurrentPosition(
+                function (pos) {
+                  useCoords(pos.coords.longitude, pos.coords.latitude);
+                },
+                function (err) {
+                  setStatus('Location denied or unavailable');
+                  done();
+                },
+                { enableHighAccuracy: true }
+              );
+            });
+          }
+        });
+        map.on('error', function (e) {
+          setStatus('Map error: ' + (e.error && e.error.message ? e.error.message : 'check token'));
+        });
+      } catch (err) {
+        setStatus('Error: ' + (err.message || err));
+      }
+    })();
+  </script>
+</body>
+
+</html>

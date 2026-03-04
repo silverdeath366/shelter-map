@@ -1,0 +1,27 @@
+# FastAPI - CVE-2024-24762 fix: >=0.109.1
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.10
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+shapely>=2.0.6
+numpy>=2.2.0
+# python-multipart - CVE-2026-24486 fix: >=0.0.22
+python-multipart>=0.0.22
+geopandas>=1.0.0
+geojson>=3.2.0
+fiona>=1.10.0
+pyproj>=3.7.0
+prometheus-client>=0.21.0
+boto3>=1.35.0
+redis>=5.2.0
+structlog>=24.0.0
+
+# AWS Cognito JWT verification
+python-jose[cryptography]>=3.4.0
+httpx>=0.28.0
+
+# Geocoding for address → lat/lon (Petah Tikva shelters)
+geopy>=2.4.0

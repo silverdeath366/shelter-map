@@ -1,0 +1,148 @@
+---
+# OPTIONAL: Redis Deployment for Distributed Rate Limiting
+# This is an optional component for distributed rate limiting across pod replicas.
+# If not deployed, the service will use in-memory rate limiting (per-pod).
+#
+# To enable Redis-based rate limiting:
+# 1. Deploy this Redis instance: kubectl apply -f redis-deployment.yaml
+# 2. Update geojson-ingestion deployment to set REDIS_ENABLED=true
+# 3. Set REDIS_HOST=redis-service in the geojson-ingestion deployment
+#
+# NOTE: This is a basic Redis setup. For production, consider:
+# - Redis Cluster mode for high availability
+# - Persistent storage for Redis data
+# - Redis Sentinel for failover
+# - Managed Redis service (AWS ElastiCache)
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: geojson-ingestion
+  labels:
+    app: redis
+    component: cache
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+    name: redis
+  selector:
+    app: redis
+  sessionAffinity: None
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: geojson-ingestion
+  labels:
+    app: redis
+    component: cache
+spec:
+  replicas: 1  # For production, consider 3+ replicas with Redis Sentinel
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: cache
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: redis
+        # CKV_K8S_43: use digest (redis:7-alpine from Docker Hub)
+        image: redis:7-alpine@sha256:98f4ea44e912d0941d29015a4e2448151b94411109c896b5627d94d79306eea7
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 6379
+          name: redis
+        # Redis configuration via command args
+        command:
+        - redis-server
+        - --maxmemory
+        - "256mb"  # Limit memory usage
+        - --maxmemory-policy
+        - "allkeys-lru"  # Evict least recently used keys when memory limit reached
+        - --appendonly
+        - "yes"  # Enable AOF persistence
+        - --appendfsync
+        - "everysec"  # Sync AOF every second (balance between performance and durability)
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"  # Max memory for Redis
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true  # CKV_K8S_22; only /data is writable (mounted)
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        emptyDir: {}  # For production, use PersistentVolumeClaim
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+
+---
+# NetworkPolicy for Redis (optional - requires network policy controller)
+# Uncomment if using network policies
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: redis-network-policy
+#   namespace: default
+# spec:
+#   podSelector:
+#     matchLabels:
+#       app: redis
+#   policyTypes:
+#   - Ingress
+#   ingress:
+#   - from:
+#     - podSelector:
+#         matchLabels:
+#           app: geojson-ingestion
+#     ports:
+#     - protocol: TCP
+#       port: 6379
+

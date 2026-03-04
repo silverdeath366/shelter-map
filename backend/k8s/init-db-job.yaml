@@ -1,0 +1,93 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-db
+  namespace: geojson-ingestion
+  labels:
+    app: geojson-ingestion
+    job: init-db
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: init-db
+        # CKV_K8S_43: use digest; update sha256 when base image changes (e.g. docker inspect postgres:15 --format '{{.Id}}')
+        image: postgres:15@sha256:739e77524f4036dd45e09368cefed617780bb24eca6c4aa9b0b431c7c0b76bca
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true  # CKV_K8S_22; script only reads env and runs psql
+          runAsNonRoot: true
+          runAsUser: 10001
+          seccompProfile:
+            type: RuntimeDefault
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          # CKV_K8S_35: read DB_* from secret files
+          export DB_HOST=$(cat /etc/secrets/db/DB_HOST)
+          export DB_PORT=$(cat /etc/secrets/db/DB_PORT)
+          export DB_NAME=$(cat /etc/secrets/db/DB_NAME)
+          export DB_USER=$(cat /etc/secrets/db/DB_USER)
+          export PGPASSWORD=$(cat /etc/secrets/db/DB_PASSWORD)
+          echo "Initializing PostGIS database..."
+          until pg_isready -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME"; do
+            echo "Waiting for database..."
+            sleep 2
+          done
+          psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" << 'EOF'
+          -- Enable PostGIS extension
+          CREATE EXTENSION IF NOT EXISTS postgis;
+          
+          -- Create geo_features table if it doesn't exist
+          CREATE TABLE IF NOT EXISTS geo_features (
+              id SERIAL PRIMARY KEY,
+              name VARCHAR(255),
+              geometry_type VARCHAR(50),
+              geom GEOMETRY(GEOMETRY, 4326),
+              properties JSONB,
+              raw_geometry JSONB,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          -- Create indexes if they don't exist
+          CREATE INDEX IF NOT EXISTS idx_geo_features_geom ON geo_features USING GIST (geom);
+          CREATE INDEX IF NOT EXISTS idx_geo_features_type ON geo_features (geometry_type);
+          CREATE INDEX IF NOT EXISTS idx_geo_features_name ON geo_features (name);
+          CREATE INDEX IF NOT EXISTS idx_geo_features_properties ON geo_features USING GIN (properties);
+          
+          -- Verify setup
+          SELECT 'PostGIS version:' as info, PostGIS_Version() as version;
+          SELECT 'Tables created:' as info, COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public';
+          SELECT 'PostGIS enabled:' as info, COUNT(*) as count FROM pg_extension WHERE extname = 'postgis';
+          EOF
+          
+          echo "Database initialization complete!"
+        volumeMounts:
+        - name: db-secrets
+          mountPath: /etc/secrets/db
+          readOnly: true
+      volumes:
+      - name: db-secrets
+        secret:
+          secretName: geojson-db-secret
+      restartPolicy: Never

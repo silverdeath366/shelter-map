@@ -1,0 +1,8 @@
+# Create namespace so Checkov CKV_K8S_21 is satisfied (no default namespace).
+# Apply before deployment, service-account, service, etc.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: geojson-ingestion
+  labels:
+    app.kubernetes.io/name: geojson-ingestion

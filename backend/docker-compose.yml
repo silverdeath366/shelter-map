@@ -1,0 +1,48 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8091:8091"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=geospatial
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_SSLMODE=disable
+      - LOG_LEVEL=INFO
+      - ENV=development
+      - AUTH_MODE=dev_open
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8091/healthz" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgis/postgis:15-3.3
+    environment:
+      - POSTGRES_DB=geospatial
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5435:5432"   # host 5435 (avoid 5434 if already in use)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d geospatial" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

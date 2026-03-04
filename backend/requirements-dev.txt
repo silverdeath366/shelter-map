@@ -1,0 +1,14 @@
+# Development dependencies
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+pytest-mock>=3.14.0
+httpx>=0.28.0
+aiosqlite>=0.21.0  # For SQLite async testing
+black>=24.10.0
+flake8>=7.1.0
+mypy>=1.14.0
+isort>=5.13.0
+pre-commit>=4.0.0
+bandit>=1.8.0
+safety>=3.3.0

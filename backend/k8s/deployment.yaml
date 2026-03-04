@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geojson-ingestion
+  namespace: geojson-ingestion
+  labels:
+    app: geojson-ingestion
+    version: v1.0.0
+spec:
+  replicas: 2  # Production: Start with 2 replicas for high availability
+  selector:
+    matchLabels:
+      app: geojson-ingestion
+  template:
+    metadata:
+      labels:
+        app: geojson-ingestion
+        version: v1.0.0
+    spec:
+      # Use IAM service account for AWS permissions (IRSA)
+      serviceAccountName: geojson-ingestion-sa
+      automountServiceAccountToken: false
+      # Pod-level security context (high UID per CKV_K8S_40)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        fsGroup: 10000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: geojson-ingestion
+        # Digest from config/image-tags.yaml (geojson_ingestion). Prefer Argo CD + Helm for deploy.
+        image: 258395061463.dkr.ecr.us-east-1.amazonaws.com/geojson-ingestion@sha256:27ca3b0b4d9650aa2981b2086cf63c68d39f7a6f52c84f271584925830bd5be2
+        ports:
+        - containerPort: 8091
+          name: http
+        # CKV_K8S_35: secrets as files - DB_* loaded from /etc/secrets/db in command
+        env:
+        - name: LOG_LEVEL
+          value: "INFO"
+        # CloudWatch Logging Configuration
+        - name: CLOUDWATCH_LOG_GROUP
+          value: "/aws/eks/geojson-ingestion"
+        - name: CLOUDWATCH_LOG_STREAM
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: AWS_REGION
+          value: "us-east-2"
+        # Redis Configuration (optional - for distributed rate limiting)
+        # Uncomment and configure if Redis is deployed
+        # - name: REDIS_ENABLED
+        #   value: "true"
+        # - name: REDIS_HOST
+        #   value: "redis-service"  # Service name of Redis deployment
+        # - name: REDIS_PORT
+        #   value: "6379"
+        # - name: REDIS_DB
+        #   value: "0"
+        # Rate limiting configuration
+        - name: RATE_LIMIT
+          value: "60"  # Requests per minute
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            [ -d /etc/secrets/db ] || { echo "Secrets volume not mounted"; exit 1; }
+            export DB_HOST=$(cat /etc/secrets/db/DB_HOST)
+            export DB_PORT=$(cat /etc/secrets/db/DB_PORT)
+            export DB_NAME=$(cat /etc/secrets/db/DB_NAME)
+            export DB_USER=$(cat /etc/secrets/db/DB_USER)
+            export DB_PASSWORD=$(cat /etc/secrets/db/DB_PASSWORD)
+            export DB_SSLMODE=$(cat /etc/secrets/db/DB_SSLMODE 2>/dev/null || echo "prefer")
+            exec uvicorn app.main:app --host 0.0.0.0 --port 8091
+        resources:
+          requests:
+            memory: "256Mi"  # Increased for production workloads
+            cpu: "100m"
+          limits:
+            memory: "512Mi"  # Increased for production workloads
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8091
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8091
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true  # CKV_K8S_22; /tmp and secrets-store are mounted
+          runAsNonRoot: true
+          runAsUser: 10000
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: db-secrets
+          mountPath: /etc/secrets/db
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: db-secrets
+        secret:
+          secretName: geojson-db-secret
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
